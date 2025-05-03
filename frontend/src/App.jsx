@@ -6,6 +6,8 @@ import Login from './Components/Login'
 import FileUpload from './Components/FileUpload'
 import { Route, Routes } from "react-router-dom"
 import Hero2 from './Components/hero2'
+
+
 function App() {
   return (
     <>

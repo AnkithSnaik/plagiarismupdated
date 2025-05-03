@@ -17,7 +17,7 @@ function Login() {
       password: data.password,
     };
     await axios
-      .post("http://localhost:4001/Student/login", studentInfo)
+      .post("http://localhost:4002/Student/login", studentInfo)
       .then((res) => {
         if (res.data) {
           alert("Logged in successfully");

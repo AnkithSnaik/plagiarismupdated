@@ -13,7 +13,7 @@ export const signup = async(req,res)=>
         const createduser = new Student
         ({
             fullname:fullname,
-            email:email,
+            email:email, 
             password:hashPassword,
         });
         await createduser.save();

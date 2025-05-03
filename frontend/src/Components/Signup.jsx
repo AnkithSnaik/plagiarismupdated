@@ -19,7 +19,7 @@ function Signup() {
       password: data.password,
     };
     await axios
-      .post("http://localhost:4001/Student/Signup", studentInfo)
+      .post("http://localhost:4002/Student/Signup", studentInfo)
       .then((res) => {
         if (res.data) {
           alert("Signup Successfully");
