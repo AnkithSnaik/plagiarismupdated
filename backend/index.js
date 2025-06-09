@@ -1,173 +1,141 @@
-// backend/index.js
-import express from "express";
-import dotenv from "dotenv";
-import mongoose from "mongoose";
-import cors from "cors";
-import multer from "multer";
-import { Readable } from "stream";
-import crypto from "crypto";
-import path from "path";
-import methodOverride from "method-override";
-import { fileURLToPath } from "url";
-import Userroute from "./route/student.router";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-dotenv.config();
+const express = require("express");
+const multer = require("multer");
+const { MongoClient, ObjectId } = require("mongodb");
+const { GridFSBucket } = require("mongodb");
+const { Readable } = require("stream");
+const axios = require("axios");
+const cors = require("cors");
 
 const app = express();
+const upload = multer(); // for multipart/form-data
+const PORT = 4002;
+const MONGO_URI = "mongodb://localhost:27017";
+const DB_NAME = "myplagiarismapp";
+
+// Middleware
 app.use(cors({ origin: "http://localhost:5173" }));
 app.use(express.json());
-app.use(methodOverride("_method"));
-app.use('/user',Userroute);
-const PORT = process.env.PORT || 4002;
-const URI = process.env.MongoDBURI || "mongodb://localhost:27017/plagiarism";
 
-mongoose.connect(URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-});
+// Connect to MongoDB
+MongoClient.connect(MONGO_URI, { useUnifiedTopology: true })
+  .then(client => {
+    const db = client.db(DB_NAME);
+    app.locals.db = db;
+    console.log("✅ Connected to MongoDB");
 
-let bucket;
+    // Endpoint to check for duplicates
+    // ... your existing imports and setup ...
 
-mongoose.connection.once("open", () => {
-  bucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, {
-    bucketName: "fileupload",
-  });
-  console.log("Connected to MongoDB and initialized GridFSBucket");
-});
+// Add this route BEFORE your /upload route
 
-const storage = multer.memoryStorage();
-const upload = multer({ storage });
+app.get("/check-duplicate", async (req, res) => {
+  const { teamNumber, projectTitle } = req.query;
 
-function calculateHash(buffer) {
-  return crypto.createHash("sha256").update(buffer).digest("hex");
-}
-
-// ✅ Upload route with hash check
-app.post("/upload", upload.single("file"), async (req, res) => {
-  const file = req.file;
-  const { teamName, teamLeader } = req.body;
-
-  if (!file || !teamName || !teamLeader) {
-    return res.status(400).send("Missing file or metadata");
-  }
-
-  if (file.mimetype !== "application/pdf") {
-    return res.status(400).send("Only PDF files are allowed.");
-  }
-
-  const fileHash = calculateHash(file.buffer);
-
-  const filename = crypto.randomBytes(16).toString("hex") + path.extname(file.originalname);
-  const readableStream = Readable.from(file.buffer);
-
-  const uploadStream = bucket.openUploadStream(filename, {
-    contentType: file.mimetype,
-    metadata: {
-      originalname: file.originalname,
-      teamName,
-      teamLeader,
-      fileHash,
-    },
-  });
-
-  readableStream.pipe(uploadStream)
-    .on("error", (err) => {
-      console.error("Upload error:", err);
-      res.status(500).send("Upload error");
-    })
-    .on("finish", () => {
-      res.status(200).send("Upload successful");
-    });
-});
-
-app.get("/files", async (req, res) => {
-  try {
-    const files = await mongoose.connection.db
-      .collection("fileupload.files")
-      .find()
-      .toArray();
-    res.json(files);
-  } catch (err) {
-    console.error("Fetch files error:", err);
-    res.status(500).send("Failed to fetch files");
-  }
-});
-
-app.get("/pdf/:id", async (req, res) => {
-  try {
-    const fileId = new mongoose.Types.ObjectId(req.params.id);
-    const file = await mongoose.connection.db
-      .collection("fileupload.files")
-      .findOne({ _id: fileId });
-
-    if (!file || file.contentType !== "application/pdf") {
-      return res.status(404).send("PDF not found");
-    }
-
-    res.set("Content-Type", "application/pdf");
-    const downloadStream = bucket.openDownloadStream(fileId);
-    downloadStream.pipe(res);
-  } catch (err) {
-    console.error("PDF preview error:", err);
-    res.status(400).send("Invalid file ID");
-  }
-});
-
-app.post("/delete/:id", async (req, res) => {
-  try {
-    await bucket.delete(new mongoose.Types.ObjectId(req.params.id));
-    res.status(200).send("File deleted");
-  } catch (err) {
-    console.error("Delete error:", err);
-    res.status(500).send("Delete error");
-  }
-});
-
-// ✅ Check plagiarism by comparing fileHash
-app.get("/check-plagiarism", async (req, res) => {
-  const { selectedFileId } = req.query;
-
-  if (!selectedFileId) {
-    return res.status(400).json({ message: "File ID is required" });
+  if (!teamNumber && !projectTitle) {
+    return res.status(400).json({ error: "Provide teamNumber and/or projectTitle" });
   }
 
   try {
-    const targetFile = await mongoose.connection.db
-      .collection("fileupload.files")
-      .findOne({ _id: new mongoose.Types.ObjectId(selectedFileId) });
+    const db = app.locals.db;
+    const filesCollection = db.collection("fileupload.files");
 
-    if (!targetFile) {
-      return res.status(404).json({ message: "File not found" });
-    }
+    let teamNumberExists = false;
+    let projectTitleExists = false;
 
-    const allFiles = await mongoose.connection.db
-      .collection("fileupload.files")
-      .find()
-      .toArray();
-
-    const results = allFiles
-      .filter((f) => f._id.toString() !== selectedFileId)
-      .map((f) => {
-        const isSame = f.metadata?.fileHash === targetFile.metadata?.fileHash;
-        return {
-          result_message: isSame ? "100% plagiarism detected" : "No plagiarism detected",
-          jaccard_score: isSame ? 1.0 : Math.random() * 0.5,
-          levenshtein_similarity: isSame ? 1.0 : Math.random() * 0.5,
-          plagiarism_score: isSame ? 1.0 : Math.random() * 0.5,
-          fileId: f._id.toString(),
-        };
+    if (teamNumber) {
+      const teamDup = await filesCollection.findOne({
+        "metadata.teamNumber": { $regex: `^${teamNumber}$`, $options: "i" },
       });
+      teamNumberExists = !!teamDup;
+    }
 
-    res.json({ plagiarismResults: results });
-  } catch (err) {
-    console.error("Plagiarism check error:", err);
-    res.status(500).json({ message: "Error checking plagiarism." });
+    if (projectTitle) {
+      const titleDup = await filesCollection.findOne({
+        "metadata.projectTitle": { $regex: `^${projectTitle}$`, $options: "i" },
+      });
+      projectTitleExists = !!titleDup;
+    }
+
+    res.json({
+      duplicateTeamNumber: teamNumberExists,
+      duplicateProjectTitle: projectTitleExists,
+    });
+
+  } catch (error) {
+    console.error("Error checking duplicates:", error);
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+
+
+    // Upload route
+    app.post("/upload", upload.single("file"), async (req, res) => {
+      const file = req.file;
+      const { teamNumber, projectTitle } = req.body;
+
+      if (!file) return res.status(400).send("No file uploaded");
+      if (!teamNumber || !projectTitle) return res.status(400).send("Missing metadata");
+
+      try {
+        const duplicate = await db.collection("fileupload.files").findOne({
+          "metadata.teamNumber": teamNumber,
+          "metadata.projectTitle": projectTitle
+        });
+
+        if (duplicate) {
+          return res.status(409).json({ message: "Duplicate team number and project title" });
+        }
+
+        const bucket = new GridFSBucket(db, { bucketName: "fileupload" });
+        const readableStream = Readable.from(file.buffer);
+
+        const uploadStream = bucket.openUploadStream(file.originalname, {
+          contentType: file.mimetype,
+          metadata: {
+            originalname: file.originalname,
+            teamNumber,
+            projectTitle
+          }
+        });
+
+        readableStream.pipe(uploadStream)
+          .on("error", (err) => {
+            console.error("Upload error:", err);
+            res.status(500).send("Upload error");
+          })
+          .on("finish", async () => {
+            const uploadedFileId = uploadStream.id.toString();
+
+            try {
+              const response = await axios.get(`http://localhost:5000/nlp-check/${uploadedFileId}`);
+              const { plagiarised, avg_similarity_score, detailedResults, message } = response.data;
+
+              res.status(200).json({
+                message,
+                fileId: uploadedFileId,
+                avg_similarity_score,
+                plagiarised,
+                plagiarismResults: detailedResults
+              });
+            } catch (err) {
+              console.error("Error calling NLP API:", err.message);
+              res.status(500).json({ message: "Upload successful, but plagiarism check failed" });
+            }
+          });
+
+      } catch (err) {
+        console.error("Unexpected error during upload:", err);
+        res.status(500).send("Internal Server Error");
+      }
+    });
+
+    // Start server
+    app.listen(PORT, () => {
+      console.log(`🚀 Server running at http://localhost:${PORT}`);
+    });
+
+  })
+  .catch(error => {
+    console.error("❌ Failed to connect to MongoDB:", error);
+  });

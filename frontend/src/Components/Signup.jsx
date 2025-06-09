@@ -18,27 +18,33 @@ function Signup() {
       email: data.email,
       password: data.password,
     };
-    await axios
-      .post("http://localhost:4002/Student/Signup", studentInfo)
-      .then((res) => {
-        if (res.data) {
-          alert("Signup Successfully");
-          navigate("/", { replace: true });
-        }
-        localStorage.setItem("Users", JSON.stringify(res.data.user));
-      })
-      .catch((err) => {
-        if (err.response) {
-          toast.error("Error: " + err.response.data.message);
-        }
-      });
+
+    try {
+      const res = await axios.post("http://localhost:4002/user/signup", studentInfo);
+
+      if (res.data) {
+        toast.success("Signup Successfully!");
+        navigate("/login", { replace: true });
+      } else {
+        toast.error("Unexpected response from server after signup.");
+      }
+    } catch (err) {
+      console.error("Signup Error:", err);
+      if (err.response && err.response.data && err.response.data.message) {
+        toast.error("Error: " + err.response.data.message);
+      } else if (err.message) {
+        toast.error("Signup failed: " + err.message);
+      } else {
+        toast.error("Signup failed: An unknown error occurred.");
+      }
+    }
   };
 
   return (
     <div className="flex h-screen items-center justify-center">
       <div className="w-[600px]">
         <div className="modal-box">
-          <form onSubmit={handleSubmit(onSubmit)} method="dialog">
+          <form onSubmit={handleSubmit(onSubmit)}>
             <Link
               to="/"
               className="btn btn-sm btn-circle btn-ghost absolute right-2 top-2"
@@ -47,6 +53,7 @@ function Signup() {
             </Link>
 
             <h3 className="font-bold text-lg">Sign Up</h3>
+
             <div className="mt-4 space-y-2">
               <span>Name</span>
               <br />
@@ -63,7 +70,7 @@ function Signup() {
                 </span>
               )}
             </div>
-            {/* Email */}
+
             <div className="mt-4 space-y-2">
               <span>Email</span>
               <br />
@@ -80,12 +87,12 @@ function Signup() {
                 </span>
               )}
             </div>
-            {/* Password */}
+
             <div className="mt-4 space-y-2">
               <span>Password</span>
               <br />
               <input
-                type="text"
+                type="password"
                 placeholder="Enter your password"
                 className="w-80 px-3 py-1 border rounded-md outline-none"
                 {...register("password", { required: true })}
@@ -97,9 +104,12 @@ function Signup() {
                 </span>
               )}
             </div>
-            {/* Button */}
+
             <div className="flex justify-around mt-4">
-              <button className="bg-pink-500 text-white rounded-md px-3 py-1 hover:bg-pink-700 duration-200">
+              <button
+                type="submit"
+                className="bg-pink-500 text-white rounded-md px-3 py-1 hover:bg-pink-700 duration-200"
+              >
                 Sign Up
               </button>
               <p className="text-xl">
